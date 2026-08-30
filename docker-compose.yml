@@ -1,0 +1,46 @@
+services:
+  api:
+    build:
+      context: .
+      target: runtime
+    environment:
+      # Persistence is OFF by default. Flip to "true" to exercise PostgreSQL.
+      PERSISTENCE_ENABLED: "${PERSISTENCE_ENABLED:-false}"
+      # Only consulted when PERSISTENCE_ENABLED=true; override via .env or the shell.
+      DATABASE_URL: "${DATABASE_URL:-postgresql+psycopg://insurance:insurance@db:5432/insurance}"
+      LOG_FORMAT: "${LOG_FORMAT:-json}"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+        # `docker compose up` starts db+api; `docker compose up api` runs the
+        # stateless service alone (Compose only warns that db is absent).
+        required: false
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: insurance
+      POSTGRES_PASSWORD: insurance
+      POSTGRES_USER: insurance
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U insurance -d insurance"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

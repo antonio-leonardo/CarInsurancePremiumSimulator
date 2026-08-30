@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.11"
+      - run: uv sync --frozen --extra dev
+      - name: ruff (lint)
+        run: uv run ruff check .
+      - name: ruff (format)
+        run: uv run ruff format --check .
+      - name: mypy --strict
+        run: uv run mypy
+      - name: import-linter
+        run: uv run lint-imports
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.11"
+      - run: uv sync --frozen --extra dev
+      - name: unit + api + architecture tests (global coverage >= 90%)
+        run: >
+          uv run pytest -m "not integration"
+          --cov-fail-under=90
+          --cov-report=xml
+      - name: domain coverage gate (>= 95%)
+        run: >
+          uv run pytest -m "not integration" tests/domain
+          -o addopts=""
+          --cov=src/car_insurance/domain --cov-report=term-missing
+          --cov-fail-under=95
+      - name: persistence integration tests (testcontainers)
+        run: uv run pytest -m integration
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build image
+        run: docker build -t car-insurance:ci .
+      - name: smoke test — stateless (POST, exact 5-field contract, deterministic age)
+        run: |
+          set -e
+          docker compose up -d --build --wait
+          # car_age is pinned to 10 regardless of the year CI runs in, so the
+          # expected numbers stay constant: rate 0.10 -> premium 9050, limit 90000.
+          YEAR=$(( $(date -u +%Y) - 10 ))
+          BODY=$(curl -sS -X POST http://localhost:8000/api/v1/premiums/calculate \
+            -H 'content-type: application/json' \
+            -d "{\"broker_fee\":50.0,\"car\":{\"make\":\"Toyota\",\"model\":\"Corolla\",\"value\":100000.0,\"year\":$YEAR},\"deductible_percentage\":0.10}")
+          echo "$BODY"
+          echo "$BODY" | python -c "import json,sys; b=json.load(sys.stdin); assert set(b)=={'applied_rate','calculated_premium','car','deductible_value','policy_limit'}, b; assert float(b['applied_rate'])==0.1, b; assert float(b['calculated_premium'])==9050.0, b; assert float(b['policy_limit'])==90000.0, b; print('stateless smoke ok')"
+          curl -sS -f http://localhost:8000/api/v1/premiums/00000000-0000-0000-0000-000000000000 -o /dev/null -w '%{http_code}\n' | grep -q 404
+          # a huge value is rejected at the schema, never a 500
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/api/v1/premiums/calculate -H 'content-type: application/json' -d '{"broker_fee":0,"car":{"make":"X","model":"Y","value":1e30,"year":2000},"deductible_percentage":0.1}')" = 422
+          docker compose down -v
+      - name: smoke test — persistence ON (entrypoint runs alembic, history round-trips)
+        run: |
+          set -e
+          PERSISTENCE_ENABLED=true docker compose up -d --build --wait
+          YEAR=$(( $(date -u +%Y) - 14 ))
+          curl -sS -X POST http://localhost:8000/api/v1/premiums/calculate \
+            -H 'content-type: application/json' \
+            -d "{\"broker_fee\":50.0,\"car\":{\"make\":\"Toyota\",\"model\":\"Corolla\",\"value\":100000.0,\"year\":$YEAR},\"deductible_percentage\":0.10}" -o /dev/null
+          ID=$(curl -sS http://localhost:8000/api/v1/premiums | python -c "import json,sys; print(json.load(sys.stdin)['items'][0]['simulation_id'])")
+          echo "persisted simulation: $ID"
+          curl -sS "http://localhost:8000/api/v1/premiums/$ID" | python -c "import json,sys; b=json.load(sys.stdin); assert float(b['calculated_premium'])==10850.0, b; assert b['rules_version']=='2026.08.0', b; print('persistence smoke ok')"
+          curl -sS -f http://localhost:8000/health/ready -o /dev/null
+      - name: compose logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: teardown
+        if: always()
+        run: PERSISTENCE_ENABLED=true docker compose down -v
