@@ -211,6 +211,35 @@ def test_event_recorded(rules) -> None:
     assert simulation.pull_events() == []
 
 
+def test_zero_adjustment_is_always_accepted_even_if_the_band_excludes_zero(rules) -> None:
+    # GIS disabled (or no provider result) yields the neutral zero adjustment.
+    # A configured band that happens to exclude zero (e.g. geography only ever
+    # *adds* risk) must not turn that neutral value into a 422.
+    from dataclasses import replace
+
+    from car_insurance.domain.value_objects.address import Address
+
+    positive_band = replace(
+        rules, gis_min_adjustment=Decimal("0.01"), gis_max_adjustment=Decimal("0.02")
+    )
+    vehicle = VehicleSnapshot(
+        make="Toyota",
+        model="Corolla",
+        value=Money(Decimal(100000), "USD"),
+        year=_year(2016),
+    )
+    simulation = PremiumSimulation.calculate(
+        broker_fee=Money(Decimal(50), "USD"),
+        deductible_percentage=Percentage(Decimal("0.1")),
+        geographic_adjustment=GeographicRateAdjustment.zero(),
+        now=_NOW,
+        registration_location=Address(country="US"),
+        rules=positive_band,
+        vehicle=vehicle,
+    )
+    assert simulation.applied_rate.value == Decimal("0.100000")  # no geo shift
+
+
 def test_aggregate_rejects_an_out_of_band_geographic_adjustment(rules) -> None:
     # Defense in depth: a fake / buggy provider adapter hands back 0.5, well
     # outside GIS_MIN/MAX_ADJUSTMENT. The aggregate must not trust it.

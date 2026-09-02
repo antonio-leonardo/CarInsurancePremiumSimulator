@@ -248,8 +248,14 @@ def test_a7_stateless_survives_unreachable_dsn(monkeypatch: pytest.MonkeyPatch) 
     assert client.post("/api/v1/premiums/calculate", json=_EXAMPLE).status_code == 200
 
 
-def test_a7_persistence_on_with_bad_dsn_fails_boot(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PERSISTENCE_ENABLED", "true")
+@pytest.mark.parametrize("persistence", ["true", "false"])
+def test_a7_malformed_dsn_fails_boot_regardless_of_persistence(
+    persistence: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The URL *shape* is validated always — a string that is not even a URL must
+    # stop the boot, never surface as a request-time 500, whether or not
+    # persistence is on.
+    monkeypatch.setenv("PERSISTENCE_ENABLED", persistence)
     monkeypatch.setenv("DATABASE_URL", "not-a-dsn")
     for cached in (dependencies.get_settings, dependencies.get_rating_rules):
         cached.cache_clear()

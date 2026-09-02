@@ -136,21 +136,30 @@ def test_calculation_is_reproducible(rules) -> None:
     assert first.id != second.id  # identity still fresh each run
 
 
-@pytest.mark.parametrize("adjustment", ["-0.02", "-0.5", "-999"])
-def test_negative_gis_never_pushes_rate_below_minimum(adjustment, rules) -> None:
-    floored = replace(rules, minimum_applied_rate=Decimal("0.00"))
+@pytest.mark.parametrize(
+    ("minimum", "expected"),
+    [("0.00", Decimal("0.000000")), ("0.01", Decimal("0.010000"))],
+)
+def test_negative_gis_never_pushes_rate_below_minimum(minimum, expected, rules) -> None:
+    # A brand-new, cheap car: base 0 + age 0 + value 0, then the largest
+    # in-band negative adjustment (-0.02) drives the raw rate negative. The
+    # configured floor must clamp it. (Out-of-band adjustments are rejected by
+    # the aggregate — see test_calculation.py.)
+    floored = replace(
+        rules, gis_min_adjustment=Decimal("-0.02"), minimum_applied_rate=Decimal(minimum)
+    )
     simulation = PremiumSimulation.calculate(
         broker_fee=Money(Decimal(0), "USD"),
         deductible_percentage=Percentage(Decimal(0)),
-        geographic_adjustment=GeographicRateAdjustment(Decimal(adjustment)),
+        geographic_adjustment=GeographicRateAdjustment(Decimal("-0.02")),
         now=_NOW,
         registration_location=None,
         rules=floored,
         vehicle=VehicleSnapshot(
             make="M",
             model="D",
-            value=Money(Decimal(100000), "USD"),
+            value=Money(Decimal(1000), "USD"),
             year=VehicleYear(2026),
         ),
     )
-    assert simulation.applied_rate.value >= Decimal(0)
+    assert simulation.applied_rate.value == expected

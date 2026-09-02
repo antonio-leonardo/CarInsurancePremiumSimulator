@@ -92,9 +92,10 @@ class PremiumSimulation:
         # Defense in depth: a buggy or hostile GeographicRateProvider adapter
         # could hand us an adjustment outside the configured band. The adapter's
         # ``GeographicRateAdjustment.within`` already guards, but the aggregate
-        # must not trust its collaborators blindly. Only a supplied location
-        # carries a provider adjustment; without one the use case passes zero.
-        if registration_location is not None and not (
+        # must not trust its collaborators blindly. A *zero* adjustment is the
+        # neutral element (GIS disabled, or no provider result) and is always
+        # accepted, even if the configured band happens to exclude zero.
+        if geographic_adjustment.value != 0 and not (
             rules.gis_min_adjustment <= geographic_adjustment.value <= rules.gis_max_adjustment
         ):
             raise GeographicRateAdjustmentError("geographic adjustment outside the configured band")

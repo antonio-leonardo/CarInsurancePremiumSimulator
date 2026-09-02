@@ -41,6 +41,26 @@ def test_nan_and_infinity_rejected(client) -> None:
         assert _post(client, broker_fee=bad).status_code == 422
 
 
+def test_malformed_json_body_is_normalised_422(client) -> None:
+    response = client.post(
+        "/api/v1/premiums/calculate",
+        content=b"{not json",
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert isinstance(detail, list) and detail
+    for item in detail:
+        assert set(item) == {"loc", "msg", "type"}
+
+
+def test_unknown_field_is_rejected_and_normalised(client) -> None:
+    response = _post(client, surprise="boom")
+    assert response.status_code == 422
+    for item in response.json()["detail"]:
+        assert set(item) == {"loc", "msg", "type"}
+
+
 def test_empty_make_rejected(client) -> None:
     assert _post(client, car={**_EXAMPLE_A["car"], "make": "   "}).status_code == 422
 
