@@ -23,7 +23,9 @@ class HttpGeographicRateProvider:
     ``fail_closed`` raises :class:`GeographicRateProviderError` (the API turns it
     into a 503); ``fail_open`` logs a warning and falls back to a zero
     adjustment.  Diagnostic logs never contain the address or the request URL —
-    only the exception *type* — because the query carries the location.
+    only the exception *type*.  The location travels in the JSON request **body**
+    of a POST (never the query string), so not even an httpx WARNING/ERROR log
+    of a failed request URL can carry it.
     """
 
     def __init__(
@@ -55,21 +57,23 @@ class HttpGeographicRateProvider:
         """Query the service for ``address`` and validate the response range."""
 
         headers = {"X-API-Key": self._api_key} if self._api_key else {}
-        params = {
+        location = {
             "city": address.city,
             "country": address.country,
             "postal_code": address.postal_code,
             "region": address.region,
         }
         try:
-            response = httpx.get(
+            response = httpx.post(
                 f"{self._base_url}/adjustments",
                 headers=headers,
-                params={key: value for key, value in params.items() if value is not None},
+                json={key: value for key, value in location.items() if value is not None},
                 timeout=self._timeout_seconds,
             )
             response.raise_for_status()
             body = response.json()
+            if not isinstance(body, dict):
+                raise TypeError("adjustment response body is not a JSON object")
             raw_adjustment = body["adjustment"]
         except (httpx.HTTPError, LookupError, TypeError, ValueError) as exc:
             return self._fallback(cause=type(exc).__name__, reason="geographic risk service error")

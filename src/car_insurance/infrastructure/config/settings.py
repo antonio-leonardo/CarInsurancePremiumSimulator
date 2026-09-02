@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 _FAILURE_MODES = frozenset({"fail_closed", "fail_open"})
 _LOG_FORMATS = frozenset({"console", "json"})
@@ -52,7 +54,13 @@ class Settings(BaseSettings):
     gis_timeout_seconds: float = 1.5
     log_format: str = "json"
     log_level: str = "INFO"
+    # PRODUCT-DECISION: input ceilings (ADR 0013). Any car value / broker fee
+    # above these returns 422, never a 500 — see CalculatePremium.execute.
+    max_broker_fee: Decimal = Decimal("1e9")
+    # PRODUCT-DECISION: 100% deductible allowed by default (ADR 0003 amendment / spec 14.1).
     max_deductible_percentage: Decimal = Decimal("1.0")
+    max_vehicle_value: Decimal = Decimal("1e11")
+    # PRODUCT-DECISION: no rate ceiling by default (ADR 0002 / spec item 14.2).
     maximum_applied_rate: Decimal | None = None
     min_vehicle_year: int = 1900
     minimum_applied_rate: Decimal = Decimal("0")
@@ -89,12 +97,22 @@ class Settings(BaseSettings):
             raise ValueError("GIS_MIN_ADJUSTMENT must not exceed GIS_MAX_ADJUSTMENT")
         if self.gis_enabled and not self.gis_base_url:
             raise ValueError("GIS_BASE_URL is required when GIS_ENABLED is true")
-        if self.persistence_enabled and "://" not in self.database_url:
-            raise ValueError("DATABASE_URL must be a valid DSN when PERSISTENCE_ENABLED is true")
+        # Validate the DSN shape *always*, not just with persistence on: a broken
+        # DATABASE_URL should stop the boot, never surface as a request-time 500.
+        try:
+            make_url(self.database_url)
+        except ArgumentError as exc:
+            raise ValueError(f"DATABASE_URL is not a valid DSN: {exc}") from exc
         if self.db_max_overflow < 0 or self.db_pool_size < 1:
             raise ValueError("DB_POOL_SIZE must be >= 1 and DB_MAX_OVERFLOW must be >= 0")
         if self.gis_timeout_seconds <= 0:
             raise ValueError("GIS_TIMEOUT_SECONDS must be greater than zero")
+        for name, ceiling in (
+            ("MAX_BROKER_FEE", self.max_broker_fee),
+            ("MAX_VEHICLE_VALUE", self.max_vehicle_value),
+        ):
+            if not ceiling.is_finite() or ceiling <= 0:
+                raise ValueError(f"{name} must be a finite number greater than zero")
         try:
             ZoneInfo(self.business_timezone)
         except (ZoneInfoNotFoundError, ValueError) as exc:

@@ -79,12 +79,15 @@ def get_calculate_premium(
 ) -> CalculatePremium:
     """The fully wired *calculate premium* use case."""
 
+    settings = get_settings()
     return CalculatePremium(
         clock=clock,
         event_publisher=event_publisher,
         geographic_rate_provider=geographic_rate_provider,
         logger=logger,
-        persistence_failure_mode=get_settings().persistence_failure_mode,
+        maximum_broker_fee=settings.max_broker_fee,
+        maximum_vehicle_value=settings.max_vehicle_value,
+        persistence_failure_mode=settings.persistence_failure_mode,
         repository=repository,
         rules=rules,
     )

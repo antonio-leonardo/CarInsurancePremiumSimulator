@@ -28,6 +28,8 @@ class RatingRules:
     base_rate: Decimal
     coverage_percentage: Decimal
     currency_code: str
+    gis_max_adjustment: Decimal
+    gis_min_adjustment: Decimal
     max_deductible_percentage: Decimal
     maximum_applied_rate: Decimal | None
     min_vehicle_year: int
@@ -45,6 +47,8 @@ class RatingRules:
             "age_rate_increment": self.age_rate_increment,
             "base_rate": self.base_rate,
             "coverage_percentage": self.coverage_percentage,
+            "gis_max_adjustment": self.gis_max_adjustment,
+            "gis_min_adjustment": self.gis_min_adjustment,
             "max_deductible_percentage": self.max_deductible_percentage,
             "minimum_applied_rate": self.minimum_applied_rate,
             "value_band_amount": self.value_band_amount,
@@ -64,9 +68,11 @@ class RatingRules:
             raise RatingRulesError("value_rate_increment must be greater than or equal to zero")
         if self.value_band_amount <= 0:
             raise RatingRulesError("value_band_amount must be greater than zero")
+        if self.gis_min_adjustment > self.gis_max_adjustment:
+            raise RatingRulesError("gis_min_adjustment must not exceed gis_max_adjustment")
         if self.coverage_percentage <= 0:
             raise RatingRulesError("coverage_percentage must be greater than zero")
-        # PRODUCT-DECISION: a deductible of at most 100% (ADR 0005 / spec item 14.1).
+        # PRODUCT-DECISION: a deductible of at most 100% (ADR 0003 amendment / spec item 14.1).
         # A configured maximum above 1 would let the premium and the policy limit
         # go negative, which is economically meaningless — reject it.
         if not (0 <= self.max_deductible_percentage <= 1):

@@ -82,9 +82,9 @@ def test_gis_enabled_shifts_rate_through_the_http_adapter(
     monkeypatch.setenv("GIS_BASE_URL", "https://gis.example")
     monkeypatch.setattr(
         httpx,
-        "get",
+        "post",
         lambda url, **_: httpx.Response(
-            200, json={"adjustment": 0.01}, request=httpx.Request("GET", url)
+            200, json={"adjustment": 0.01}, request=httpx.Request("POST", url)
         ),
     )
     body = (
@@ -103,9 +103,9 @@ def test_gis_out_of_range_is_503(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GIS_BASE_URL", "https://gis.example")
     monkeypatch.setattr(
         httpx,
-        "get",
+        "post",
         lambda url, **_: httpx.Response(
-            200, json={"adjustment": 0.9}, request=httpx.Request("GET", url)
+            200, json={"adjustment": 0.9}, request=httpx.Request("POST", url)
         ),
     )
     response = TestClient(create_app()).post(
@@ -124,7 +124,7 @@ def test_gis_fail_open_falls_back_to_zero(monkeypatch: pytest.MonkeyPatch) -> No
     def _refuse(url, **_):
         raise httpx.ConnectError("refused")
 
-    monkeypatch.setattr(httpx, "get", _refuse)
+    monkeypatch.setattr(httpx, "post", _refuse)
     body = (
         TestClient(create_app())
         .post(

@@ -209,3 +209,27 @@ def test_event_recorded(rules) -> None:
     assert events[0].rules_version == "2026.08.0"
     assert events[0].vehicle_year == 2016
     assert simulation.pull_events() == []
+
+
+def test_aggregate_rejects_an_out_of_band_geographic_adjustment(rules) -> None:
+    # Defense in depth: a fake / buggy provider adapter hands back 0.5, well
+    # outside GIS_MIN/MAX_ADJUSTMENT. The aggregate must not trust it.
+    from car_insurance.domain.errors import GeographicRateAdjustmentError
+    from car_insurance.domain.value_objects.address import Address
+
+    vehicle = VehicleSnapshot(
+        make="Toyota",
+        model="Corolla",
+        value=Money(Decimal(100000), "USD"),
+        year=_year(2016),
+    )
+    with pytest.raises(GeographicRateAdjustmentError):
+        PremiumSimulation.calculate(
+            broker_fee=Money(Decimal(50), "USD"),
+            deductible_percentage=Percentage(Decimal("0.1")),
+            geographic_adjustment=GeographicRateAdjustment(Decimal("0.5")),
+            now=_NOW,
+            registration_location=Address(country="US"),
+            rules=rules,
+            vehicle=vehicle,
+        )

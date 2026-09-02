@@ -78,14 +78,17 @@ def test_gis_unavailable_returns_503(api_context) -> None:
     from car_insurance.presentation.api import dependencies
     from tests.conftest import FakeLogger, FixedClock
 
+    settings = Settings()
     failing = CalculatePremium(
         clock=FixedClock(moment=datetime(2026, 3, 1, tzinfo=UTC)),
         event_publisher=api_context["publisher"],
         geographic_rate_provider=FakeGeographicRateProvider(error=True),
         logger=FakeLogger(),
+        maximum_broker_fee=settings.max_broker_fee,
+        maximum_vehicle_value=settings.max_vehicle_value,
         persistence_failure_mode="fail_closed",
         repository=api_context["repository"],
-        rules=build_rating_rules(settings=Settings()),
+        rules=build_rating_rules(settings=settings),
     )
     client.app.dependency_overrides[dependencies.get_calculate_premium] = lambda: failing
 

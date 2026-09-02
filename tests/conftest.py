@@ -40,17 +40,23 @@ class FakeEventPublisher:
 class FakeLogger:
     """Records structured log calls for assertions."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, bound: dict[str, object] | None = None) -> None:
         self.calls: list[tuple[str, str, dict[str, object]]] = []
+        self.bound: dict[str, object] = dict(bound or {})
+
+    def bind(self, /, **fields: object) -> FakeLogger:
+        child = FakeLogger(bound={**self.bound, **fields})
+        child.calls = self.calls  # share the sink so assertions see every line
+        return child
 
     def error(self, event: str, /, **fields: object) -> None:
-        self.calls.append(("error", event, dict(fields)))
+        self.calls.append(("error", event, {**self.bound, **fields}))
 
     def info(self, event: str, /, **fields: object) -> None:
-        self.calls.append(("info", event, dict(fields)))
+        self.calls.append(("info", event, {**self.bound, **fields}))
 
     def warning(self, event: str, /, **fields: object) -> None:
-        self.calls.append(("warning", event, dict(fields)))
+        self.calls.append(("warning", event, {**self.bound, **fields}))
 
 
 class FakeGeographicRateProvider:
@@ -113,6 +119,8 @@ def rules() -> RatingRules:
         base_rate=Decimal(0),
         coverage_percentage=Decimal("1.00"),
         currency_code="USD",
+        gis_max_adjustment=Decimal("0.02"),
+        gis_min_adjustment=Decimal("-0.02"),
         max_deductible_percentage=Decimal("1.0"),
         maximum_applied_rate=None,
         min_vehicle_year=1900,

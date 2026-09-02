@@ -12,6 +12,12 @@ Accepted (2026-08-30)
   `HttpGeographicRateProvider` calls the external service with `httpx`, a
   `GIS_TIMEOUT_SECONDS` timeout, and validates the response is within
   `[GIS_MIN_ADJUSTMENT, GIS_MAX_ADJUSTMENT]` (defaults `[-0.02, +0.02]`).
+  The request is a **POST** carrying the location fields in the JSON body —
+  never the query string — so a URL cannot carry the location into any log
+  (audit finding A4, defense in depth). `GIS_MIN/MAX_ADJUSTMENT` are also
+  surfaced on `RatingRules`, and `PremiumSimulation.calculate` re-asserts the
+  provider's adjustment is in band before using it — the aggregate does not
+  trust its adapter blindly.
 * Failure / timeout / out-of-range: `fail_closed` (default) → propagate as HTTP
   503; `fail_open` → adjustment 0 + `logger.warning`.
 * A location supplied while `GIS_ENABLED=false` is accepted, adjustment zero; no

@@ -82,6 +82,18 @@ def test_structlog_logger_forwards_all_levels() -> None:
     ]
 
 
+def test_structlog_logger_bind_returns_a_logger_carrying_fields() -> None:
+    from structlog.testing import capture_logs
+
+    logger = StructlogLogger(name="test")
+    child = logger.bind(simulation_id="abc-123")
+    with capture_logs() as events:
+        child.info("premium.calculated", applied_rate="0.10")
+        logger.info("unbound.line")
+    assert events[0]["simulation_id"] == "abc-123"
+    assert "simulation_id" not in events[1]  # bind does not mutate the parent
+
+
 def test_settings_defaults_build_rules() -> None:
     rules = build_rating_rules(settings=Settings())
     assert rules.currency_code == "USD"
@@ -118,10 +130,23 @@ def test_settings_rejects_bad_config(env: dict[str, str], monkeypatch: pytest.Mo
         Settings()
 
 
-def test_persistence_off_ignores_a_bad_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_persistence_off_tolerates_an_unreachable_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A syntactically valid DSN that simply cannot connect is fine while
+    # persistence is off — no engine is ever built (A7).
+    monkeypatch.setenv("PERSISTENCE_ENABLED", "false")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@nohost:5432/db")
+    assert Settings().persistence_enabled is False
+
+
+def test_malformed_dsn_fails_boot_even_with_persistence_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A DSN that is not even a URL stops the boot regardless of persistence (A7):
+    # it must never surface as a request-time 500.
     monkeypatch.setenv("PERSISTENCE_ENABLED", "false")
     monkeypatch.setenv("DATABASE_URL", "not-a-dsn")
-    assert Settings().persistence_enabled is False  # no error — persistence is off
+    with pytest.raises(ValueError):
+        Settings()
 
 
 def test_settings_blank_maximum_rate_is_none(monkeypatch: pytest.MonkeyPatch) -> None:

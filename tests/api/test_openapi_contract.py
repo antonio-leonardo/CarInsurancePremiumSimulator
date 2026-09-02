@@ -43,7 +43,18 @@ def test_calculate_response_schema_is_narrow(client) -> None:
 def test_error_responses_are_documented(client) -> None:
     schema = client.get("/openapi.json").json()
     responses = schema["paths"]["/api/v1/premiums/calculate"]["post"]["responses"]
-    assert {"200", "422", "503"}.issubset(responses)
+    assert {"200", "422", "500", "503"}.issubset(responses)
+    assert "503" in schema["paths"]["/health/ready"]["get"]["responses"]
+
+
+def test_calculate_has_named_examples(client) -> None:
+    schema = client.get("/openapi.json").json()
+    operation = schema["paths"]["/api/v1/premiums/calculate"]["post"]
+    request_examples = operation["requestBody"]["content"]["application/json"]["examples"]
+    assert {"exampleA", "noLocation"}.issubset(request_examples)
+    for code in ("200", "422", "503", "500"):
+        examples = operation["responses"][code]["content"]["application/json"]["examples"]
+        assert examples, f"response {code} has no named example"
 
 
 def test_docs_and_redoc_render(client) -> None:

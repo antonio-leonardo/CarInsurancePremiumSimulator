@@ -96,14 +96,21 @@ def test_large_integer_value_echo_is_exact() -> None:
 # --- #7: stateless service survives an invalid DATABASE_URL --------------------
 
 
-def test_stateless_ignores_a_broken_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stateless_ignores_an_unreachable_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PERSISTENCE_ENABLED", "false")
-    monkeypatch.setenv("DATABASE_URL", "totally-not-a-dsn")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@nohost:5432/db")
     client = TestClient(create_app())
 
     assert client.get("/health/ready").status_code == 200
     assert client.post("/api/v1/premiums/calculate", json=_EXAMPLE).status_code == 200
     assert client.get("/api/v1/premiums").json() == {"items": [], "next_cursor": None}
+
+
+def test_malformed_dsn_stops_the_boot(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PERSISTENCE_ENABLED", "false")
+    monkeypatch.setenv("DATABASE_URL", "totally-not-a-dsn")
+    with pytest.raises(Exception):  # noqa: B017 - pydantic ValidationError wraps our ValueError
+        create_app()
 
 
 # --- #4: GIS diagnostics never carry the location -----------------------------
@@ -117,11 +124,11 @@ def test_gis_fallback_log_has_no_location(monkeypatch: pytest.MonkeyPatch) -> No
     def _explode(url, **kwargs):
         raise httpx.HTTPStatusError(
             f"500 for {url}?city=SecretCity&postal_code=99999",
-            request=httpx.Request("GET", url),
-            response=httpx.Response(500, request=httpx.Request("GET", url)),
+            request=httpx.Request("POST", url),
+            response=httpx.Response(500, request=httpx.Request("POST", url)),
         )
 
-    monkeypatch.setattr(httpx, "get", _explode)
+    monkeypatch.setattr(httpx, "post", _explode)
     client = TestClient(create_app())
     with capture_logs() as events:
         body = client.post(
@@ -158,8 +165,8 @@ def test_gis_list_body_is_not_a_500(
     monkeypatch.setenv("GIS_FAILURE_MODE", mode)
     monkeypatch.setattr(
         httpx,
-        "get",
-        lambda url, **_: httpx.Response(200, json=[], request=httpx.Request("GET", url)),
+        "post",
+        lambda url, **_: httpx.Response(200, json=[], request=httpx.Request("POST", url)),
     )
     client = TestClient(create_app())
     response = client.post(

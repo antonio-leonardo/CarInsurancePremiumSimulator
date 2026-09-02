@@ -14,6 +14,8 @@ def build_rating_rules(*, settings: Settings) -> RatingRules:
         base_rate=settings.base_rate,
         coverage_percentage=settings.coverage_percentage,
         currency_code=settings.currency_code,
+        gis_max_adjustment=settings.gis_max_adjustment,
+        gis_min_adjustment=settings.gis_min_adjustment,
         max_deductible_percentage=settings.max_deductible_percentage,
         maximum_applied_rate=settings.maximum_applied_rate,
         min_vehicle_year=settings.min_vehicle_year,

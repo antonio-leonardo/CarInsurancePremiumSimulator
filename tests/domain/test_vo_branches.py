@@ -33,6 +33,8 @@ def _rules(**overrides: object) -> RatingRules:
         "base_rate": Decimal(0),
         "coverage_percentage": Decimal(1),
         "currency_code": "USD",
+        "gis_max_adjustment": Decimal("0.02"),
+        "gis_min_adjustment": Decimal("-0.02"),
         "max_deductible_percentage": Decimal(1),
         "maximum_applied_rate": None,
         "min_vehicle_year": 1900,
@@ -188,3 +190,8 @@ def test_rating_rules_quantize_helpers() -> None:
 def test_rating_rules_accepts_maximum() -> None:
     rules = _rules(maximum_applied_rate=Decimal("0.5"))
     assert rules.maximum_applied_rate == Decimal("0.5")
+
+
+def test_rating_rules_rejects_inverted_gis_band() -> None:
+    with pytest.raises(RatingRulesError):
+        _rules(gis_min_adjustment=Decimal("0.5"), gis_max_adjustment=Decimal("0.1"))

@@ -56,10 +56,13 @@ class CarResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    make: str
-    model: str
-    value: NumberOut
-    year: int
+    make: str = Field(description="Vehicle manufacturer, echoed unchanged.", examples=["Toyota"])
+    model: str = Field(description="Vehicle model name, echoed unchanged.", examples=["Corolla"])
+    value: NumberOut = Field(
+        description="Insured value, echoed exactly (integral values emit as JSON integers).",
+        examples=[100000.0],
+    )
+    year: int = Field(description="Model year, echoed unchanged.", examples=[2012])
 
 
 class RegistrationLocationRequest(BaseModel):
@@ -74,10 +77,18 @@ class RegistrationLocationRequest(BaseModel):
     country: str = Field(
         min_length=2, max_length=2, description="ISO-3166-1 alpha-2 country code.", examples=["US"]
     )
-    city: _Text | None = None
-    line1: _Text | None = None
-    postal_code: _Text | None = None
-    region: _Text | None = None
+    city: _Text | None = Field(
+        default=None, description="City / locality.", examples=["Los Angeles"]
+    )
+    line1: _Text | None = Field(
+        default=None, description="Street address line.", examples=["1 Main St"]
+    )
+    postal_code: _Text | None = Field(
+        default=None, description="Postal / ZIP code.", examples=["90001"]
+    )
+    region: _Text | None = Field(
+        default=None, description="State / province / region.", examples=["CA"]
+    )
 
 
 class CalculatePremiumRequest(BaseModel):
@@ -142,13 +153,19 @@ class CalculatePremiumResponse(BaseModel):
         },
     )
 
-    applied_rate: NumberOut = Field(description="Final rate as a fraction (0.12 means 12%).")
+    applied_rate: NumberOut = Field(
+        description="Final rate as a fraction (0.12 means 12%).", examples=[0.12]
+    )
     calculated_premium: NumberOut = Field(
-        description="Premium after the deductible discount and fee."
+        description="Premium after the deductible discount and fee.", examples=[10850.00]
     )
     car: CarResponse = Field(description="The insured vehicle, echoed unchanged.")
-    deductible_value: NumberOut = Field(description="Absolute deductible amount.")
-    policy_limit: NumberOut = Field(description="Coverage limit after the deductible.")
+    deductible_value: NumberOut = Field(
+        description="Absolute deductible amount.", examples=[10000.00]
+    )
+    policy_limit: NumberOut = Field(
+        description="Coverage limit after the deductible.", examples=[90000.00]
+    )
 
 
 class SimulationRecordResponse(BaseModel):
@@ -156,14 +173,20 @@ class SimulationRecordResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    applied_rate: NumberOut
-    calculated_premium: NumberOut
-    car: CarResponse
-    created_at: datetime
-    deductible_value: NumberOut
-    policy_limit: NumberOut
-    rules_version: str
-    simulation_id: UUID
+    applied_rate: NumberOut = Field(description="Final rate as a fraction.", examples=[0.12])
+    calculated_premium: NumberOut = Field(description="Stored premium.", examples=[10850.00])
+    car: CarResponse = Field(description="The insured vehicle.")
+    created_at: datetime = Field(
+        description="When the simulation was calculated.",
+        examples=["2026-08-30T12:00:00+00:00"],
+    )
+    deductible_value: NumberOut = Field(description="Absolute deductible.", examples=[10000.00])
+    policy_limit: NumberOut = Field(description="Coverage limit.", examples=[90000.00])
+    rules_version: str = Field(description="Rating rules version in force.", examples=["2026.08.0"])
+    simulation_id: UUID = Field(
+        description="Identifier of the persisted simulation.",
+        examples=["1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed"],
+    )
 
 
 class PaginationParams(BaseModel):
@@ -185,13 +208,15 @@ class SimulationPageResponse(BaseModel):
 
 
 class ErrorItem(BaseModel):
-    """One FastAPI-style validation error entry.
+    """One validation error entry — exactly ``loc`` / ``msg`` / ``type``.
 
-    ``loc``/``msg``/``type`` are always present; Pydantic-generated entries also
-    carry ``input`` and ``ctx``, hence ``extra="allow"``.
+    The ``RequestValidationError`` handler normalises Pydantic's raw entries
+    (which also carry ``input`` and ``ctx``) down to these three keys, so the
+    422 body is identical whether the failure is a schema or a domain invariant
+    (ADR 0008).
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     loc: list[str | int] = Field(default_factory=list, examples=[["body", "deductible_percentage"]])
     msg: str = Field(examples=["Input should be less than or equal to 1"])

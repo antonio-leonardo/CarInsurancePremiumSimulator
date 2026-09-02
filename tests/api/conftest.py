@@ -40,6 +40,8 @@ def api_context() -> Iterator[dict[str, object]]:
         event_publisher=publisher,
         geographic_rate_provider=provider,
         logger=FakeLogger(),
+        maximum_broker_fee=settings.max_broker_fee,
+        maximum_vehicle_value=settings.max_vehicle_value,
         persistence_failure_mode="fail_closed",
         repository=repository,
         rules=rules,

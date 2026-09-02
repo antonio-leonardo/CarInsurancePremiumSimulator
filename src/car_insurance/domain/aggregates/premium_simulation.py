@@ -8,6 +8,7 @@ from car_insurance.domain.errors import (
     BrokerFeeError,
     CurrencyMismatchError,
     DeductibleOutOfRangeError,
+    GeographicRateAdjustmentError,
     VehicleYearError,
 )
 from car_insurance.domain.events.premium_simulation_calculated import PremiumSimulationCalculated
@@ -88,6 +89,15 @@ class PremiumSimulation:
 
         if vehicle.year.is_after(year=now.year):
             raise VehicleYearError("vehicle year must not be in the future")
+        # Defense in depth: a buggy or hostile GeographicRateProvider adapter
+        # could hand us an adjustment outside the configured band. The adapter's
+        # ``GeographicRateAdjustment.within`` already guards, but the aggregate
+        # must not trust its collaborators blindly. Only a supplied location
+        # carries a provider adjustment; without one the use case passes zero.
+        if registration_location is not None and not (
+            rules.gis_min_adjustment <= geographic_adjustment.value <= rules.gis_max_adjustment
+        ):
+            raise GeographicRateAdjustmentError("geographic adjustment outside the configured band")
         if broker_fee.currency != rules.currency_code:
             raise CurrencyMismatchError("broker_fee currency differs from configured currency")
         if vehicle.value.currency != rules.currency_code:

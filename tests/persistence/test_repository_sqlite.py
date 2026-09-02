@@ -58,6 +58,8 @@ def _use_case(factory, rules) -> CalculatePremium:
         event_publisher=OutboxEventPublisher(unit_of_work=unit_of_work),
         geographic_rate_provider=FakeGeographicRateProvider(),
         logger=FakeLogger(),
+        maximum_broker_fee=Decimal("1e9"),
+        maximum_vehicle_value=Decimal("1e11"),
         persistence_failure_mode="fail_closed",
         repository=SqlAlchemySimulationRepository(
             session_factory=factory, unit_of_work=unit_of_work
@@ -150,3 +152,19 @@ def test_save_failure_becomes_repository_error(factory, rules) -> None:
         session.commit()
     with pytest.raises(SimulationRepositoryError):
         use_case.execute(request=_request())
+
+
+def test_outbox_insert_failure_rolls_back_the_parent_row(factory, rules) -> None:
+    # The parent row flushes fine, then the outbox INSERT fails: the whole
+    # transaction must roll back so no orphan simulation row is left behind.
+    use_case = _use_case(factory, rules)
+    with factory() as session:
+        session.execute(text("DROP TABLE event_outbox"))
+        session.commit()
+
+    with pytest.raises(SimulationRepositoryError):
+        use_case.execute(request=_request())
+
+    with factory() as session:
+        rows = session.execute(text("SELECT count(*) FROM premium_simulations")).scalar()
+    assert rows == 0

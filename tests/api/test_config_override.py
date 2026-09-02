@@ -38,6 +38,8 @@ def _client_with_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> TestClient:
         event_publisher=FakeEventPublisher(),
         geographic_rate_provider=FakeGeographicRateProvider(),
         logger=FakeLogger(),
+        maximum_broker_fee=settings.max_broker_fee,
+        maximum_vehicle_value=settings.max_vehicle_value,
         persistence_failure_mode="fail_closed",
         repository=FakeRepository(),
         rules=build_rating_rules(settings=settings),

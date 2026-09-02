@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -65,6 +66,8 @@ def _build_use_case(engine, *, rules) -> tuple[CalculatePremium, sessionmaker]:
         event_publisher=OutboxEventPublisher(unit_of_work=unit_of_work),
         geographic_rate_provider=FakeGeographicRateProvider(),
         logger=FakeLogger(),
+        maximum_broker_fee=Decimal("1e9"),
+        maximum_vehicle_value=Decimal("1e11"),
         persistence_failure_mode="fail_closed",
         repository=repository,
         rules=rules,
@@ -103,6 +106,36 @@ def test_save_persists_row_and_outbox_in_one_transaction(engine, rules) -> None:
     ).execute(simulation_id=SimulationId(output.simulation_id))
     assert fetched is not None
     assert fetched.calculated_premium == Decimal("10850.00")
+
+
+@pytest.mark.usefixtures("_clean")
+def test_six_decimal_place_premium_round_trips_identically(engine, rules) -> None:
+    # A5: the NUMERIC columns carry no fixed scale, so a premium quantised to
+    # MONEY_DECIMAL_PLACES=6 persists and comes back byte-for-byte.
+    fine_rules = replace(rules, money_decimal_places=6)
+    use_case, factory = _build_use_case(engine, rules=fine_rules)
+    from car_insurance.application.dto.calculate_premium_input import (
+        CalculatePremiumInput,
+        CarInput,
+    )
+
+    output = use_case.execute(
+        request=CalculatePremiumInput(
+            broker_fee=Decimal("50"),
+            car=CarInput(make="Toyota", model="Corolla", value=Decimal("100000.55"), year=2012),
+            deductible_percentage=Decimal("0.10"),
+        )
+    )
+    assert output.calculated_premium.as_tuple().exponent == -6
+
+    fetched = GetSimulation(
+        repository=SqlAlchemySimulationRepository(
+            session_factory=factory, unit_of_work=UnitOfWork(session_factory=factory)
+        )
+    ).execute(simulation_id=SimulationId(output.simulation_id))
+    assert fetched is not None
+    assert fetched.calculated_premium == output.calculated_premium
+    assert fetched.calculated_premium.as_tuple().exponent == -6
 
 
 def test_migration_matches_orm_models(engine) -> None:

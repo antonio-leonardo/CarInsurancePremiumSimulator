@@ -21,13 +21,17 @@ Accepted (2026-08-30)
 
 ## Consequences
 * The calculation core never depends on the database.
-* With persistence **off**, `DATABASE_URL` is never read and no engine is
-  created — `get_engine()` returns `None`, `get_unit_of_work()` carries no
-  session factory. An invalid DSN cannot break the stateless service.
-* With persistence **on**, `DATABASE_URL` (must contain `://`) and the pool
-  sizes are validated at startup; the domain rule set and the engine are
-  materialised in `create_app()` so a bad configuration fails the boot, not the
-  first request.
+* With persistence **off**, no engine is created — `get_engine()` returns
+  `None`, `get_unit_of_work()` carries no session factory. An *unreachable*
+  DSN (valid URL, dead host) cannot break the stateless service.
+* `DATABASE_URL` is validated for **URL shape** at startup **always**, with
+  `sqlalchemy.engine.make_url`, regardless of `PERSISTENCE_ENABLED` — a string
+  that is not even a URL (`not-a-dsn`) stops the boot rather than surfacing as a
+  request-time 500 (audit finding A7). Connectivity is only exercised when
+  persistence is on.
+* With persistence **on**, the pool sizes are validated too, and the domain
+  rule set and the engine are materialised in `create_app()` so a bad
+  configuration fails the boot, not the first request.
 * Money/rate columns are unbounded `NUMERIC` (scale is `MONEY_DECIMAL_PLACES` /
   `RATE_DECIMAL_PLACES`, i.e. configuration — the schema must not impose its
   own). An integration test asserts `alembic autogenerate` is empty against the

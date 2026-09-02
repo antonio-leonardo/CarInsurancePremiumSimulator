@@ -128,6 +128,8 @@ Coverage gates (CI): **>= 95%** in `domain/`, **>= 90%** overall.
 | `CURRENCY_CODE` | `USD` | ISO-4217 currency |
 | `MONEY_DECIMAL_PLACES` / `MONEY_ROUNDING_MODE` | `2` / `ROUND_HALF_UP` | money quantisation |
 | `RATE_DECIMAL_PLACES` / `RATE_ROUNDING_MODE` | `6` / `ROUND_HALF_UP` | rate quantisation |
+| `MAX_VEHICLE_VALUE` | `1e11` | largest accepted `car.value`; above ⇒ 422, never 500 (ADR 0013) |
+| `MAX_BROKER_FEE` | `1e9` | largest accepted `broker_fee`; above ⇒ 422, never 500 (ADR 0013) |
 | `BUSINESS_TIMEZONE` | `UTC` | timezone for the calendar-year calculation |
 | `PERSISTENCE_ENABLED` | `false` | turn PostgreSQL persistence on |
 | `DATABASE_URL` | `postgresql+psycopg://insurance:insurance@db:5432/insurance` | DB DSN |
@@ -137,19 +139,22 @@ Coverage gates (CI): **>= 95%** in `domain/`, **>= 90%** overall.
 | `GIS_BASE_URL` / `GIS_API_KEY` | _(empty)_ | external GIS service |
 | `GIS_TIMEOUT_SECONDS` | `1.5` | GIS HTTP timeout |
 | `GIS_FAILURE_MODE` | `fail_closed` | `fail_closed` → 503, `fail_open` → adjustment 0 + log |
-| `GIS_MIN_ADJUSTMENT` / `GIS_MAX_ADJUSTMENT` | `-0.02` / `0.02` | accepted adjustment range |
+| `GIS_MIN_ADJUSTMENT` / `GIS_MAX_ADJUSTMENT` | `-0.02` / `0.02` | accepted adjustment range (also re-checked by the aggregate) |
 | `LOG_LEVEL` / `LOG_FORMAT` | `INFO` / `json` | structlog |
 
 Changing any rule = **restart the container**. No rebuild, no code change.
 Every value is validated at startup — an invalid rule set (e.g.
-`VALUE_BAND_AMOUNT=0`, `MAX_DEDUCTIBLE_PERCENTAGE=1.5`) or, with persistence on,
-a malformed `DATABASE_URL`, stops the process rather than failing the first
-request. When persistence is **off**, `DATABASE_URL` is ignored entirely and no
-database engine is created.
+`VALUE_BAND_AMOUNT=0`, `MAX_DEDUCTIBLE_PERCENTAGE=1.5`, `MAXIMUM_APPLIED_RATE`
+not representable at `RATE_DECIMAL_PLACES`) or a `DATABASE_URL` that is not a
+valid URL stops the process rather than failing the first request. The
+`DATABASE_URL` **shape** is checked regardless of `PERSISTENCE_ENABLED`; when
+persistence is **off** no connection is attempted and no engine is created, so
+an unreachable-but-valid DSN is harmless.
 
-`broker_fee` and `car.value` are capped at `1e11` at the HTTP schema (a value
-above that is a `422`, never a `500`); within that range the `Decimal → JSON
-number` projection is exact.
+`broker_fee` and `car.value` are capped by `MAX_BROKER_FEE` / `MAX_VEHICLE_VALUE`
+(a value above the cap is a `422`, never a `500`); a fixed `1e11` schema guard
+sits behind them. Within the permitted range the `Decimal → JSON number`
+projection is exact (integral values emit as JSON integers).
 
 ## Observability
 

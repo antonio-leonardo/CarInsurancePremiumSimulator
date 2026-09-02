@@ -13,6 +13,9 @@ from typing import Protocol
 class Logger(Protocol):
     """A minimal structured logger: an event name plus keyword fields."""
 
+    def bind(self, /, **fields: object) -> Logger:
+        """Return a logger that carries ``fields`` on every subsequent line."""
+
     def error(self, event: str, /, **fields: object) -> None: ...
 
     def info(self, event: str, /, **fields: object) -> None: ...

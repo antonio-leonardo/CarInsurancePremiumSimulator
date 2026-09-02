@@ -90,6 +90,8 @@ def test_rating_rules_rejects_zero_value_band() -> None:
             base_rate=Decimal(0),
             coverage_percentage=Decimal(1),
             currency_code="USD",
+            gis_max_adjustment=Decimal("0.02"),
+            gis_min_adjustment=Decimal("-0.02"),
             max_deductible_percentage=Decimal(1),
             maximum_applied_rate=None,
             min_vehicle_year=1900,

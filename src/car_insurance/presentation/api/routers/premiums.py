@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 
 from car_insurance.application.dto.calculate_premium_input import (
     CalculatePremiumInput,
@@ -35,16 +35,115 @@ from car_insurance.presentation.api.schemas import (
 
 router = APIRouter(prefix="/api/v1/premiums", tags=["Premiums"])
 
+_REQUEST_EXAMPLE_A = {
+    "broker_fee": 50.0,
+    "car": {"make": "Toyota", "model": "Corolla", "value": 100000.0, "year": 2012},
+    "deductible_percentage": 0.10,
+    "registration_location": {"country": "US", "postal_code": "90001", "region": "CA"},
+}
+_REQUEST_EXAMPLES: dict[str, dict[str, Any]] = {
+    "exampleA": {
+        "summary": "Example A — full request with a registration location",
+        "value": _REQUEST_EXAMPLE_A,
+    },
+    "noLocation": {
+        "summary": "Minimal request — no location (geographic adjustment is zero)",
+        "value": {
+            "broker_fee": 50.0,
+            "car": {"make": "Toyota", "model": "Corolla", "value": 100000.0, "year": 2012},
+            "deductible_percentage": 0.10,
+        },
+    },
+}
 _CALCULATE_RESPONSES: dict[int | str, dict[str, Any]] = {
+    200: {
+        "content": {
+            "application/json": {
+                "examples": {
+                    "success": {
+                        "summary": "Example A — a successful quote",
+                        "value": {
+                            "applied_rate": 0.12,
+                            "calculated_premium": 10850.00,
+                            "car": {
+                                "make": "Toyota",
+                                "model": "Corolla",
+                                "value": 100000.0,
+                                "year": 2012,
+                            },
+                            "deductible_value": 10000.00,
+                            "policy_limit": 90000.00,
+                        },
+                    }
+                }
+            }
+        }
+    },
     422: {
         "model": ValidationErrorResponse,
         "description": "Invalid schema or a violated domain input invariant",
+        "content": {
+            "application/json": {
+                "examples": {
+                    "schema": {
+                        "summary": "A schema violation",
+                        "value": {
+                            "detail": [
+                                {
+                                    "loc": ["body", "deductible_percentage"],
+                                    "msg": "Input should be less than or equal to 1",
+                                    "type": "less_than_equal",
+                                }
+                            ]
+                        },
+                    },
+                    "domain": {
+                        "summary": "A domain invariant violation",
+                        "value": {
+                            "detail": [
+                                {
+                                    "loc": [],
+                                    "msg": "car.year must not be in the future",
+                                    "type": "domain_error",
+                                }
+                            ]
+                        },
+                    },
+                }
+            }
+        },
     },
     503: {
         "model": MessageResponse,
         "description": "GIS unavailable (fail-closed) with a location supplied",
+        "content": {
+            "application/json": {
+                "examples": {
+                    "unavailable": {
+                        "summary": "Geographic risk service down (fail-closed)",
+                        "value": {"detail": "geographic risk service unavailable"},
+                    }
+                }
+            }
+        },
     },
-    500: {"model": InternalErrorResponse, "description": "Sanitised unexpected error"},
+    500: {
+        "model": InternalErrorResponse,
+        "description": "Sanitised unexpected error",
+        "content": {
+            "application/json": {
+                "examples": {
+                    "internal": {
+                        "summary": "A sanitised internal error",
+                        "value": {
+                            "detail": "internal error",
+                            "request_id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed",
+                        },
+                    }
+                }
+            }
+        },
+    },
 }
 _NOT_FOUND_RESPONSES: dict[int | str, dict[str, Any]] = {
     404: {"model": MessageResponse, "description": "Not found or persistence disabled"},
@@ -64,7 +163,7 @@ def _to_record_response(output: object) -> SimulationRecordResponse:
     summary="Calculate a car insurance premium",
 )
 def calculate_premium(
-    payload: CalculatePremiumRequest,
+    payload: Annotated[CalculatePremiumRequest, Body(openapi_examples=_REQUEST_EXAMPLES)],
     use_case: Annotated[CalculatePremium, Depends(get_calculate_premium)],
 ) -> CalculatePremiumResponse:
     """Run the full premium calculation and return exactly the five contract fields."""

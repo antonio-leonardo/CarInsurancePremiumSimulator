@@ -40,6 +40,8 @@ class CalculatePremium:
         event_publisher: EventPublisher,
         geographic_rate_provider: GeographicRateProvider,
         logger: Logger,
+        maximum_broker_fee: Decimal,
+        maximum_vehicle_value: Decimal,
         persistence_failure_mode: str,
         repository: SimulationRepository,
         rules: RatingRules,
@@ -48,6 +50,8 @@ class CalculatePremium:
         self._event_publisher = event_publisher
         self._geographic_rate_provider = geographic_rate_provider
         self._logger = logger
+        self._maximum_broker_fee = maximum_broker_fee
+        self._maximum_vehicle_value = maximum_vehicle_value
         self._persistence_failure_mode = persistence_failure_mode
         self._repository = repository
         self._rules = rules
@@ -67,22 +71,23 @@ class CalculatePremium:
         rules = self._rules
         now = self._clock.now()
 
+        vehicle_value = self._to_decimal(field="car.value", value=request.car.value)
+        if vehicle_value > self._maximum_vehicle_value:
+            raise DomainError(f"car.value must not exceed {self._maximum_vehicle_value}")
+        broker_fee_amount = self._to_decimal(field="broker_fee", value=request.broker_fee)
+        if broker_fee_amount > self._maximum_broker_fee:
+            raise DomainError(f"broker_fee must not exceed {self._maximum_broker_fee}")
+
         vehicle = VehicleSnapshot(
             make=request.car.make,
             model=request.car.model,
-            value=Money(
-                self._to_decimal(field="car.value", value=request.car.value),
-                rules.currency_code,
-            ),
+            value=Money(vehicle_value, rules.currency_code),
             year=VehicleYear.create(minimum=rules.min_vehicle_year, value=request.car.year),
         )
         if vehicle.year.is_after(year=now.year):
             raise DomainError("car.year must not be in the future")
 
-        broker_fee = Money(
-            self._to_decimal(field="broker_fee", value=request.broker_fee),
-            rules.currency_code,
-        )
+        broker_fee = Money(broker_fee_amount, rules.currency_code)
         deductible_percentage = Percentage(
             self._to_decimal(
                 field="deductible_percentage",
@@ -117,22 +122,22 @@ class CalculatePremium:
             vehicle=vehicle,
         )
 
+        logger = self._logger.bind(simulation_id=str(simulation.id))
         events = simulation.pull_events()
         self._event_publisher.publish(events=events)
         try:
             self._repository.save(simulation=simulation)
         except SimulationRepositoryError:
             if self._persistence_failure_mode == _FAIL_OPEN:
-                self._logger.error("persistence.failed", simulation_id=str(simulation.id))
+                logger.error("persistence.failed")
             else:
                 raise
 
-        self._logger.info(
+        logger.info(
             "premium.calculated",
             applied_rate=str(simulation.applied_rate.value),
             calculated_premium=str(simulation.calculated_premium.amount),
             country=simulation.registration_country,
-            simulation_id=str(simulation.id),
             vehicle_year=vehicle.year.value,
         )
 

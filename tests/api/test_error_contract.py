@@ -22,14 +22,18 @@ def test_domain_error_body_has_fastapi_shape(client) -> None:
     body = response.json()
     assert isinstance(body["detail"], list)
     item = body["detail"][0]
-    assert set(item) >= {"loc", "msg", "type"}
+    assert set(item) == {"loc", "msg", "type"}
     assert isinstance(item["loc"], list)
 
 
 def test_schema_error_also_422(client) -> None:
     response = _post(client, deductible_percentage="not-a-number")
     assert response.status_code == 422
-    assert isinstance(response.json()["detail"], list)
+    detail = response.json()["detail"]
+    assert isinstance(detail, list)
+    # normalised: exactly loc/msg/type, never Pydantic's echoed ``input`` / ``ctx``
+    for item in detail:
+        assert set(item) == {"loc", "msg", "type"}
 
 
 def test_nan_and_infinity_rejected(client) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import structlog
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from car_insurance.application.ports.geographic_rate_provider import GeographicRateProviderError
@@ -39,6 +40,18 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def handle_invalid_cursor(_: Request, __: InvalidCursorError) -> JSONResponse:
         return _validation_response(message="invalid pagination cursor", type_="invalid_cursor")
 
+    async def handle_request_validation_error(
+        _: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        # Normalise Pydantic's entries to exactly ``loc`` / ``msg`` / ``type`` so
+        # the 422 body matches ``ValidationErrorResponse`` and never leaks the
+        # echoed ``input`` value or a ``ctx`` object (ADR 0008).
+        detail = [
+            {"loc": list(error["loc"]), "msg": error["msg"], "type": error["type"]}
+            for error in exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": detail})
+
     # alpha-order: framework (Starlette calls handlers as ``handler(request, exc)``)
     async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
         request_id = getattr(request.state, "request_id", None) or current_request_id() or "unknown"
@@ -52,4 +65,8 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(DomainError, handle_domain_error)  # type: ignore[arg-type]
     app.add_exception_handler(GeographicRateProviderError, handle_gis_error)  # type: ignore[arg-type]
     app.add_exception_handler(InvalidCursorError, handle_invalid_cursor)  # type: ignore[arg-type]
+    app.add_exception_handler(
+        RequestValidationError,
+        handle_request_validation_error,  # type: ignore[arg-type]
+    )
     app.add_exception_handler(Exception, handle_unexpected_error)
