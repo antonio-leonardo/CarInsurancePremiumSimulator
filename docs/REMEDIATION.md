@@ -7,13 +7,23 @@ reproduces A1–A9 exactly as a permanent guard.
 
 Gates after this round: `ruff check` / `ruff format --check` clean, `mypy
 --strict` (71 files) clean, `import-linter` 2 contracts kept (`structlog` now
-forbidden in the core), **349 non-integration tests + 6 integration = 355**,
-100% non-integration coverage (statements + branches), 99.6% domain.
+forbidden in the core), **353 non-integration tests + 6 integration = 359**,
+100% non-integration coverage (statements + branches), 99.6% domain,
+`docker build` + both `docker compose` smokes (stateless and persistence-on)
+green.
 
-> Docker was unavailable in the remediation environment, so `pytest -m
-> integration`, `docker build` and the two compose smokes must be re-confirmed
-> in CI / a Docker host. The integration additions mirror passing SQLite
-> equivalents.
+Each fix was mutation-tested: reverting it turns at least one regression test
+red (verified for A1 ceilings, A4 httpx pinning + POST body, A7 always-validate,
+A8 `except` widening, A10 normalisation, and the aggregate GIS-band guard).
+
+> **Follow-up fix (Red-Green-Refactor).** Hardening surfaced a regression in the
+> new aggregate GIS-band guard: it was gated on `registration_location is not
+> None`, so with GIS **off** and a location supplied — where the use case passes
+> the neutral *zero* adjustment — a configured band that excludes zero
+> (`GIS_MIN_ADJUSTMENT=0.01`) produced a spurious 422, contradicting ADR 0010.
+> Fixed: zero is the neutral element and is always accepted; the band is only
+> re-checked for non-zero adjustments.
+> Guard: `tests/domain/test_calculation.py::test_zero_adjustment_is_always_accepted_even_if_the_band_excludes_zero`.
 
 | # | Finding (one line) | Files changed | Tests |
 |---|---|---|---|
@@ -35,6 +45,6 @@ forbidden in the core), **349 non-integration tests + 6 integration = 355**,
 |---|---|---|
 | `# PRODUCT-DECISION:` markers at the decision sites | `domain/value_objects/rating_rules.py`, `infrastructure/config/settings.py` (`maximum_applied_rate`, `currency_code`, `max_deductible_percentage`, input ceilings), `domain/value_objects/address.py` | `tests/architecture` (marker scan is manual; ADR cross-refs 0002/0003/0005/0013) |
 | Aggregate rejects a future model year on its own | `domain/aggregates/premium_simulation.py` (already in place) | `tests/domain/test_calculation.py::test_aggregate_rejects_a_future_model_year` |
-| Aggregate re-checks the GIS adjustment is in `[gis_min, gis_max]` | `domain/value_objects/rating_rules.py` (`gis_min/max_adjustment` fields), `infrastructure/config/rules_factory.py`, `domain/aggregates/premium_simulation.py` | `tests/domain/test_calculation.py::test_aggregate_rejects_an_out_of_band_geographic_adjustment`; `tests/domain/test_vo_branches.py::test_rating_rules_rejects_inverted_gis_band` |
+| Aggregate re-checks the GIS adjustment is in `[gis_min, gis_max]` (zero always allowed) | `domain/value_objects/rating_rules.py` (`gis_min/max_adjustment` fields), `infrastructure/config/rules_factory.py`, `domain/aggregates/premium_simulation.py` | `tests/domain/test_calculation.py::test_aggregate_rejects_an_out_of_band_geographic_adjustment`, `::test_zero_adjustment_is_always_accepted_even_if_the_band_excludes_zero`; `tests/domain/test_vo_branches.py::test_rating_rules_rejects_inverted_gis_band` |
 | Outbox atomicity — outbox insert failure rolls back the parent row | (behaviour of `SqlAlchemySimulationRepository.save` + `UnitOfWork.transaction`) | `tests/persistence/test_repository_sqlite.py::test_outbox_insert_failure_rolls_back_the_parent_row` |
 | Base images / actions pinned by tag, not digest — conscious decision | `docs/adr/0015-image-tags-not-digests.md` | n/a (ADR) |
