@@ -64,6 +64,8 @@ class RatingRules:
             raise RatingRulesError("maximum_applied_rate must be a finite Decimal or None")
         if self.age_rate_increment < 0:
             raise RatingRulesError("age_rate_increment must be greater than or equal to zero")
+        if self.base_rate < 0:
+            raise RatingRulesError("base_rate must be greater than or equal to zero")
         if self.value_rate_increment < 0:
             raise RatingRulesError("value_rate_increment must be greater than or equal to zero")
         if self.value_band_amount <= 0:

@@ -48,3 +48,34 @@ A8 `except` widening, A10 normalisation, and the aggregate GIS-band guard).
 | Aggregate re-checks the GIS adjustment is in `[gis_min, gis_max]` (zero always allowed) | `domain/value_objects/rating_rules.py` (`gis_min/max_adjustment` fields), `infrastructure/config/rules_factory.py`, `domain/aggregates/premium_simulation.py` | `tests/domain/test_calculation.py::test_aggregate_rejects_an_out_of_band_geographic_adjustment`, `::test_zero_adjustment_is_always_accepted_even_if_the_band_excludes_zero`; `tests/domain/test_vo_branches.py::test_rating_rules_rejects_inverted_gis_band` |
 | Outbox atomicity — outbox insert failure rolls back the parent row | (behaviour of `SqlAlchemySimulationRepository.save` + `UnitOfWork.transaction`) | `tests/persistence/test_repository_sqlite.py::test_outbox_insert_failure_rolls_back_the_parent_row` |
 | Base images / actions pinned by tag, not digest — conscious decision | `docs/adr/0015-image-tags-not-digests.md` | n/a (ADR) |
+
+## Round 2 — second blind audit + test hardening (2026-09-02)
+
+A second adversarial pass over the remediated build (`353 passed, 100% coverage`)
+found **no new critical/high issue** — the A1–A11 fixes hold under fresh probing
+(HTTP verbs, duplicate JSON keys, request-id injection into the 500 path,
+`COVERAGE_PERCENTAGE` blow-up, concurrent persisted writes). Outcome:
+
+| Item | Severity | Change | Tests |
+|---|---|---|---|
+| `BASE_RATE < 0` was accepted at config load (inconsistent with `AGE_RATE_INCREMENT` / `VALUE_RATE_INCREMENT`, which reject negatives) and then silently swallowed by the rate clamp. | LOW | `domain/value_objects/rating_rules.py` now rejects `base_rate < 0`; `.env.example` note. | `tests/domain/test_vo_branches.py::test_rating_rules_rejects[base_rate]` |
+| `COVERAGE_PERCENTAGE` has no upper sanity bound (`1000` ⇒ 100000% coverage, a huge `policy_limit`). | LOW / product | Left as-is — an operator asking for >100% coverage is legitimate and the spec sets no ceiling. Noted only. | n/a |
+| `GET /api/v1/premiums/calculate` returns 422 (parsed as `GET {simulation_id}`), not 405. | cosmetic | Left as-is — 422 on an unroutable verb is harmless. | n/a |
+
+### Test hardening — `tests/e2e/` (marker `e2e`, runs in the default `-m "not integration"` set)
+
+`tests/e2e/test_full_stack.py` — the real ASGI app over **real transport and real storage**, filling the gap between the fake-injected `tests/api` suite and the Postgres-only `tests/persistence` suite:
+
+* **Real GIS transport** — a throwaway threaded `http.server` is the GIS backend; the adapter makes a genuine `httpx` POST. Covers: happy-path rate adjustment (`0.10 → 0.11`), upstream `500`, connection-refused, and read-timeout — each asserted against both `fail_closed` (503) and `fail_open` (0), with the location kept out of every captured log line.
+* **Real persistence** — a real on-disk SQLite DB built by the real `alembic upgrade head`, driven entirely through HTTP: `POST` → `GET {id}` → paginated `GET` list → cursor page 2 → `404` for an unknown id → `/health/ready` runs `SELECT 1`; the outbox row lands in the same transaction; `MONEY_DECIMAL_PLACES=4` flows to both the response and the stored history.
+* **Served contract** — the OpenAPI document FastAPI actually serves is valid, carries all five `operationId`s and documents `200/422/500/503`; `/docs` + `/redoc` render.
+* **Hostile `X-Request-ID`** (200-char, spaces, tabs, `;`/`=`) is dropped for a fresh UUID.
+* Stateless mode survives an unreachable `DATABASE_URL` with persistence off.
+
+### Test hardening — CI `docker` smoke (`.github/workflows/ci.yml`)
+
+* new job step: image size budget (`< 250 MiB`) + **non-root** assertion (`id -u != 0`);
+* stateless smoke extended: `/health/live` + `/health/ready`, served `/openapi.json` documents `200/422/500/503` + `operationId`, `/docs` + `/redoc` reachable, the `1e30` value and a future model year both return a `422` whose body items are exactly `{loc,msg,type}`;
+* new smoke: `GIS_ENABLED=true` + unreachable `GIS_BASE_URL` + `fail_closed` ⇒ **503** from the container (never 500) — `docker-compose.yml` now threads the `GIS_*` vars;
+* persistence-on smoke also asserts the narrow `car` shape;
+* `test` job runs the `e2e` suite once more in isolation (`-m e2e`).

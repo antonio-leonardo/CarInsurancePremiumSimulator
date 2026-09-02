@@ -35,11 +35,13 @@ jobs:
         with:
           version: "0.5.11"
       - run: uv sync --frozen --extra dev
-      - name: unit + api + architecture tests (global coverage >= 90%)
+      - name: unit + api + architecture + e2e tests (global coverage >= 90%)
         run: >
           uv run pytest -m "not integration"
           --cov-fail-under=90
           --cov-report=xml
+      - name: e2e suite in isolation (real transport + real SQLite)
+        run: uv run pytest -m e2e -o addopts="" -q
       - name: domain coverage gate (>= 95%)
         run: >
           uv run pytest -m "not integration" tests/domain
@@ -55,7 +57,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: build image
         run: docker build -t car-insurance:ci .
-      - name: smoke test — stateless (POST, exact 5-field contract, deterministic age)
+      - name: image is lean and runs as a non-root user
+        run: |
+          set -e
+          SIZE=$(docker image inspect car-insurance:ci --format '{{.Size}}')
+          echo "image size: $((SIZE/1024/1024)) MiB"
+          test "$SIZE" -lt $((250*1024*1024))  # budget: < 250 MiB
+          UID=$(docker run --rm --entrypoint id car-insurance:ci -u)
+          test "$UID" != "0"
+      - name: smoke test — stateless (contract, health, OpenAPI, error bodies)
         run: |
           set -e
           docker compose up -d --build --wait
@@ -67,9 +77,29 @@ jobs:
             -d "{\"broker_fee\":50.0,\"car\":{\"make\":\"Toyota\",\"model\":\"Corolla\",\"value\":100000.0,\"year\":$YEAR},\"deductible_percentage\":0.10}")
           echo "$BODY"
           echo "$BODY" | python -c "import json,sys; b=json.load(sys.stdin); assert set(b)=={'applied_rate','calculated_premium','car','deductible_value','policy_limit'}, b; assert float(b['applied_rate'])==0.1, b; assert float(b['calculated_premium'])==9050.0, b; assert float(b['policy_limit'])==90000.0, b; print('stateless smoke ok')"
-          curl -sS -f http://localhost:8000/api/v1/premiums/00000000-0000-0000-0000-000000000000 -o /dev/null -w '%{http_code}\n' | grep -q 404
-          # a huge value is rejected at the schema, never a 500
-          test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/api/v1/premiums/calculate -H 'content-type: application/json' -d '{"broker_fee":0,"car":{"make":"X","model":"Y","value":1e30,"year":2000},"deductible_percentage":0.1}')" = 422
+          # liveness always 200; readiness 200 with persistence off
+          curl -sS -f http://localhost:8000/health/live -o /dev/null
+          curl -sS -f http://localhost:8000/health/ready -o /dev/null
+          # the served OpenAPI is valid and documents 200/422/500/503 + Swagger UIs render
+          curl -sS http://localhost:8000/openapi.json | python -c "import json,sys; s=json.load(sys.stdin); r=s['paths']['/api/v1/premiums/calculate']['post']['responses']; assert {'200','422','500','503'} <= set(r), r; assert s['paths']['/api/v1/premiums/calculate']['post']['operationId']=='calculatePremium'; print('openapi ok')"
+          curl -sS -f http://localhost:8000/docs -o /dev/null
+          curl -sS -f http://localhost:8000/redoc -o /dev/null
+          # unknown history id -> 404 (persistence off)
+          test "$(curl -sS -o /dev/null -w '%{http_code}' http://localhost:8000/api/v1/premiums/00000000-0000-0000-0000-000000000000)" = 404
+          # a huge value is rejected at the schema, never a 500; body is {loc,msg,type}
+          ERR=$(curl -sS -X POST http://localhost:8000/api/v1/premiums/calculate -H 'content-type: application/json' -d '{"broker_fee":0,"car":{"make":"X","model":"Y","value":1e30,"year":2000},"deductible_percentage":0.1}')
+          echo "$ERR" | python -c "import json,sys; b=json.load(sys.stdin); assert all(set(i)=={'loc','msg','type'} for i in b['detail']), b; print('error-body shape ok')"
+          # a future model year is a domain 422 (not a 500), same body shape
+          FUT=$(( $(date -u +%Y) + 5 ))
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/api/v1/premiums/calculate -H 'content-type: application/json' -d "{\"broker_fee\":0,\"car\":{\"make\":\"X\",\"model\":\"Y\",\"value\":10000,\"year\":$FUT},\"deductible_percentage\":0.1}")" = 422
+          docker compose down -v
+      - name: smoke test — GIS fail-closed returns 503 (never 500)
+        run: |
+          set -e
+          GIS_ENABLED=true GIS_BASE_URL=http://127.0.0.1:9 GIS_FAILURE_MODE=fail_closed \
+            GIS_TIMEOUT_SECONDS=1 docker compose up -d --build --wait
+          YEAR=$(( $(date -u +%Y) - 10 ))
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/api/v1/premiums/calculate -H 'content-type: application/json' -d "{\"broker_fee\":50.0,\"car\":{\"make\":\"T\",\"model\":\"C\",\"value\":100000.0,\"year\":$YEAR},\"deductible_percentage\":0.10,\"registration_location\":{\"country\":\"US\"}}")" = 503
           docker compose down -v
       - name: smoke test — persistence ON (entrypoint runs alembic, history round-trips)
         run: |
@@ -79,9 +109,10 @@ jobs:
           curl -sS -X POST http://localhost:8000/api/v1/premiums/calculate \
             -H 'content-type: application/json' \
             -d "{\"broker_fee\":50.0,\"car\":{\"make\":\"Toyota\",\"model\":\"Corolla\",\"value\":100000.0,\"year\":$YEAR},\"deductible_percentage\":0.10}" -o /dev/null
-          ID=$(curl -sS http://localhost:8000/api/v1/premiums | python -c "import json,sys; print(json.load(sys.stdin)['items'][0]['simulation_id'])")
+          PAGE=$(curl -sS http://localhost:8000/api/v1/premiums)
+          ID=$(echo "$PAGE" | python -c "import json,sys; print(json.load(sys.stdin)['items'][0]['simulation_id'])")
           echo "persisted simulation: $ID"
-          curl -sS "http://localhost:8000/api/v1/premiums/$ID" | python -c "import json,sys; b=json.load(sys.stdin); assert float(b['calculated_premium'])==10850.0, b; assert b['rules_version']=='2026.08.0', b; print('persistence smoke ok')"
+          curl -sS "http://localhost:8000/api/v1/premiums/$ID" | python -c "import json,sys; b=json.load(sys.stdin); assert float(b['calculated_premium'])==10850.0, b; assert b['rules_version']=='2026.08.0', b; assert set(b['car'])=={'make','model','value','year'}, b; print('persistence smoke ok')"
           curl -sS -f http://localhost:8000/health/ready -o /dev/null
       - name: compose logs on failure
         if: failure()

@@ -160,6 +160,7 @@ def test_simulation_id_rejects_non_uuid() -> None:
         {"age_rate_increment": Decimal("NaN")},
         {"maximum_applied_rate": Decimal("Infinity")},
         {"age_rate_increment": Decimal(-1)},
+        {"base_rate": Decimal(-1)},  # a negative base rate is silently swallowed by the clamp
         {"value_rate_increment": Decimal(-1)},
         {"coverage_percentage": Decimal(0)},
         {"minimum_applied_rate": Decimal(-1)},

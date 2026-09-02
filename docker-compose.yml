@@ -10,6 +10,11 @@ services:
       DATABASE_URL: "${DATABASE_URL:-postgresql+psycopg://insurance:insurance@db:5432/insurance}"
       LOG_FORMAT: "${LOG_FORMAT:-json}"
       LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+      # GIS is OFF by default; the smoke suite flips these from the shell.
+      GIS_ENABLED: "${GIS_ENABLED:-false}"
+      GIS_BASE_URL: "${GIS_BASE_URL:-}"
+      GIS_FAILURE_MODE: "${GIS_FAILURE_MODE:-fail_closed}"
+      GIS_TIMEOUT_SECONDS: "${GIS_TIMEOUT_SECONDS:-1.5}"
     env_file:
       - path: .env
         required: false

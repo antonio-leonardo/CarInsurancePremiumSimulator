@@ -68,6 +68,7 @@ addopts = "--cov=src/car_insurance --cov-report=term-missing --cov-branch --stri
 testpaths = ["tests"]
 markers = [
     "integration: tests that require external services (PostgreSQL via testcontainers)",
+    "e2e: full-stack tests over real transport/storage (self-contained: local HTTP server + SQLite)",
 ]
 filterwarnings = [
     "error",
@@ -78,6 +79,13 @@ filterwarnings = [
 [tool.coverage.run]
 branch = true
 source = ["src/car_insurance"]
+omit = [
+    # Alembic scripts are proven by the integration suite (real `alembic upgrade
+    # head` + downgrade + autogenerate-empty), not by line coverage. The e2e
+    # suite imports them in-process, which would otherwise pull the
+    # offline-migration / downgrade branches into the non-integration report.
+    "src/car_insurance/infrastructure/persistence/alembic/*",
+]
 
 [tool.coverage.report]
 exclude_lines = [
